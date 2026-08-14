@@ -31,7 +31,8 @@ def obtener_tasas_bcv():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     }
     try:
-        response = requests.get(url, headers=headers, verify=False)
+        # Añadimos timeout=7 para que si el BCV no responde rápido, falle de forma limpia
+        response = requests.get(url, headers=headers, verify=False, timeout=7)
         soup = BeautifulSoup(response.content, 'html.parser')
         
         # Extraer tasa del Dólar
@@ -73,9 +74,8 @@ def callback_ver_tasa(call):
             f"💶 **Euro:** {tasa_euro} Bs."
         )
     else:
-        respuesta = "⚠️ Hubo un error al conectar con la página del BCV en este momento. Inténtalo de nuevo más tarde."
+        respuesta = "⚠️ La página del BCV está tardando mucho en responder o se encuentra caída en este momento. Inténtalo de nuevo en unos minutos."
     
-    # Edita el mensaje o envía uno nuevo con la respuesta
     bot.send_message(call.message.chat.id, respuesta, parse_mode="Markdown")
 
 if __name__ == "__main__":
