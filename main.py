@@ -1,6 +1,16 @@
+import os
 import threading
 from flask import Flask
+import requests
+from bs4 import BeautifulSoup
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import urllib3
 
+# Desactivar advertencias SSL para la web del BCV
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Configurar el servidor web falso para evitar el Time Out en Render
 app = Flask(__name__)
 
 @app.route('/')
@@ -11,86 +21,68 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-threading.Thread(target=run_web, daemon=True).start()
-
-import os
-import requests
-from bs4 import BeautifulSoup
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import urllib3
-
-# Desactivar advertencias SSL para la web del BCV
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Obtiene el Token desde las variables del servidor
+# Obtener el Token del bot desde las variables de entorno de Render
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
-def obtener_datos_bcv():
+def obtener_tasas_bcv():
     url = "https://www.bcv.org.ve/"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     }
-    
     try:
-        response = requests.get(url, headers=headers, verify=False, timeout=12)
+        response = requests.get(url, headers=headers, verify=False)
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # 1. Tasa Dólar
+        # Extraer tasa del Dólar
         div_dolar = soup.find('div', id='dolar')
-        dolar = div_dolar.find('strong').text.strip().replace(',', '.') if div_dolar else "N/D"
+        tasa_dolar = div_dolar.find('strong').text.strip() if div_dolar else "No disponible"
         
-        # 2. Tasa Euro
+        # Extraer tasa del Euro
         div_euro = soup.find('div', id='euro')
-        euro = div_euro.find('strong').text.strip().replace(',', '.') if div_euro else "N/D"
+        tasa_euro = div_euro.find('strong').text.strip() if div_euro else "No disponible"
         
-        # 3. Fecha Valor
-        div_fecha = soup.find('span', class_='date-display-single')
-        fecha = div_fecha.text.strip() if div_fecha else "Fecha no disponible"
-        
-        return {
-            "dolar": dolar,
-            "euro": euro,
-            "fecha": fecha
-        }
+        return tasa_dolar, tasa_euro
     except Exception as e:
-        print(f"Error extrayendo datos del BCV: {e}")
-        return None
+        print(f"Error al obtener datos del BCV: {e}")
+        return None, None
 
-# Comando /start o /tasa
-@bot.message_handler(commands=['start', 'tasa'])
-def cmd_start(message):
+# Comando /start que envía un mensaje de bienvenida con el botón interactivo
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
     markup = InlineKeyboardMarkup()
-    boton = InlineKeyboardButton("💵 Consultar Tasa BCV", callback_data="ver_bcv")
-    markup.add(boton)
+    boton_tasa = InlineKeyboardButton("📊 Ver Tasa del BCV", callback_data="ver_tasa")
+    markup.add(boton_tasa)
     
-    bot.send_message(
-        message.chat.id,
-        "👋 ¡Hola! Presiona el botón para obtener la tasa oficial del Banco Central de Venezuela directamente desde su sitio web.",
-        reply_markup=markup
+    texto_bienvenida = (
+        "¡Bienvenido al Bot de Tasas del BCV! 🇻🇪\n\n"
+        "Presiona el botón de abajo para consultar las tasas oficiales actualizadas del dólar y del euro:"
     )
+    bot.send_message(message.chat.id, texto_bienvenida, reply_markup=markup)
 
-# Acción al presionar el botón
-@bot.callback_query_handler(func=lambda call: call.data == "ver_bcv")
-def callback_bcv(call):
-    bot.answer_callback_query(call.id, "Consultando sitio web del BCV...")
+# Manejar la acción cuando presionan el botón
+@bot.callback_query_handler(func=lambda call: call.data == "ver_tasa")
+def callback_ver_tasa(call):
+    bot.answer_callback_query(call.id, "Consultando al BCV...")
+    tasa_dolar, tasa_euro = obtener_tasas_bcv()
     
-    datos = obtener_datos_bcv()
-    
-    if datos:
-        mensaje = (
-            f"🏦 *BANCO CENTRAL DE VENEZUELA*\n"
-            f"📌 *Tipo de Cambio Oficial*\n\n"
-            f"💵 **USD:** {datos['dolar']} Bs.\n"
-            f"💶 **EUR:** {datos['euro']} Bs.\n\n"
-            f"📅 _Fecha Valor: {datos['fecha']}_"
+    if tasa_dolar and tasa_euro:
+        respuesta = (
+            "📈 **Tasas Oficiales BCV:**\n\n"
+            f"💵 **Dólar:** {tasa_dolar} Bs.\n"
+            f"💶 **Euro:** {tasa_euro} Bs."
         )
     else:
-        mensaje = "⚠️ No se pudo obtener la información del BCV en este momento. Intenta de nuevo más tarde."
-        
-    bot.send_message(call.message.chat.id, mensaje, parse_mode="Markdown")
+        respuesta = "⚠️ Hubo un error al conectar con la página del BCV en este momento. Inténtalo de nuevo más tarde."
+    
+    # Edita el mensaje o envía uno nuevo con la respuesta
+    bot.send_message(call.message.chat.id, respuesta, parse_mode="Markdown")
 
 if __name__ == "__main__":
-    print("Bot iniciando escuchas...")
+    # 1. Iniciar Flask en un hilo en segundo plano para cumplir con el puerto de Render
+    server_thread = threading.Thread(target=run_web, daemon=True)
+    server_thread.start()
+    
+    # 2. Iniciar el bot de Telegram en el proceso principal
+    print("Iniciando bot de Telegram...")
     bot.infinity_polling()
