@@ -23,6 +23,7 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
 def limpiar_tasa_a_float(texto_tasa):
+    """Limpia el texto del BCV (ej: '785,0693' o '36.123,45') a un float real."""
     try:
         limpio = texto_tasa.strip().replace('.', '').replace(',', '.')
         return float(limpio)
@@ -53,6 +54,7 @@ def obtener_tasas_bcv():
         print(f"Error al obtener datos del BCV: {e}")
         return "No disponible", "No disponible", 0.0, 0.0
 
+# Teclado fijo en la parte inferior para que el botón nunca se pierda arriba
 def obtener_teclado_principal():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, persistent=True)
     boton_tasa = KeyboardButton("🔄 Actualizar Tasa BCV")
@@ -68,7 +70,7 @@ def send_welcome(message):
     )
     bot.send_message(message.chat.id, texto, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
 
-# 1. Manejador exclusivo del botón (Prioridad alta)
+# 1. Manejador exclusivo para cuando tocas el botón fijo de abajo
 @bot.message_handler(func=lambda message: message.text == "🔄 Actualizar Tasa BCV")
 def actualizar_por_boton(message):
     tasa_dolar, tasa_euro, _, _ = obtener_tasas_bcv()
@@ -85,8 +87,8 @@ def actualizar_por_boton(message):
     
     bot.send_message(message.chat.id, respuesta, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
 
-# 2. Manejador de la calculadora (Ignora explícitamente el texto del botón para que no colisionen)
-@bot.message_handler(func=lambda message: message.text != "🔄 Actualizar Tasa BCV")
+# 2. Manejador de la calculadora para cualquier número que escribas
+@bot.message_handler(func=lambda message: True)
 def calcular_monto(message):
     texto_usuario = message.text.strip().replace(',', '.')
     
