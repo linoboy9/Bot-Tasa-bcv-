@@ -22,42 +22,31 @@ def run_web():
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
-def limpiar_tasa_a_float(texto_tasa):
-    try:
-        limpio = texto_tasa.strip().replace('.', '').replace(',', '.')
-        return float(limpio)
-    except Exception:
-        return 0.0
-
 def obtener_tasas_bcv():
     url = "https://www.bcv.org.ve/"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'es-ES,es;q=0.9',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     }
     try:
-        # Subimos el timeout a 12 segundos para darle margen al servidor del BCV
-        response = requests.get(url, headers=headers, verify=False, timeout=12)
-        if response.status_code != 200:
-            return "No disponible", "No disponible", 0.0, 0.0
-            
+        response = requests.get(url, headers=headers, verify=False, timeout=7)
         soup = BeautifulSoup(response.content, 'html.parser')
         
         div_dolar = soup.find('div', id='dolar')
-        tasa_dolar_str = div_dolar.find('strong').text.strip() if div_dolar else "0"
+        tasa_dolar = div_dolar.find('strong').text.strip() if div_dolar else "No disponible"
         
         div_euro = soup.find('div', id='euro')
-        tasa_euro_str = div_euro.find('strong').text.strip() if div_euro else "0"
+        tasa_euro = div_euro.find('strong').text.strip() if div_euro else "No disponible"
         
-        val_dolar = limpiar_tasa_a_float(tasa_dolar_str)
-        val_euro = limpiar_tasa_a_float(tasa_euro_str)
-        
-        return tasa_dolar_str, tasa_euro_str, val_dolar, val_euro
-               
+        return tasa_dolar, tasa_euro
     except Exception as e:
         print(f"Error al obtener datos del BCV: {e}")
-        return "No disponible", "No disponible", 0.0, 0.0
+        return None, None
+
+def limpiar_a_float(texto_tasa):
+    try:
+        return float(texto_tasa.replace('.', '').replace(',', '.'))
+    except Exception:
+        return 0.0
 
 def obtener_teclado_principal():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, persistent=True)
@@ -70,18 +59,16 @@ def send_welcome(message):
     texto = (
         "¡Bienvenido al Bot de Tasas del BCV! 🇻🇪\n\n"
         "• Presiona el botón de abajo para consultar las tasas oficiales.\n"
-        "• O **escribe cualquier cantidad** (ej: `100` o `50.50`) para calcular su equivalencia en Bolívares."
+        "• O escribe un monto (ej: `100`) para calcular automáticamente."
     )
     bot.send_message(message.chat.id, texto, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
 
+# 1. BOTÓN DE ACTUALIZAR (Debe ir primero para que capture el texto exacto del botón)
 @bot.message_handler(func=lambda message: message.text == "🔄 Actualizar Tasa BCV")
 def actualizar_por_boton(message):
-    # Avisamos al usuario inmediatamente para que no piense que se congeló
-    msg_espera = bot.send_message(message.chat.id, "⏳ Consultando al BCV...", reply_markup=obtener_teclado_principal())
+    tasa_dolar, tasa_euro = obtener_tasas_bcv()
     
-    tasa_dolar, tasa_euro, _, _ = obtener_tasas_bcv()
-    
-    if tasa_dolar != "No disponible" and tasa_euro != "No disponible":
+    if tasa_dolar and tasa_euro:
         respuesta = (
             "📈 **Tasas Oficiales BCV:**\n\n"
             f"💵 **Dólar:** `{tasa_dolar}` Bs.\n"
@@ -91,12 +78,9 @@ def actualizar_por_boton(message):
     else:
         respuesta = "⚠️ La página del BCV está tardando o está caída. Intenta de nuevo en unos minutos."
     
-    # Editamos el mensaje de espera con el resultado final
-    try:
-        bot.edit_message_text(respuesta, chat_id=message.chat.id, message_id=msg_espera.message_id, parse_mode="Markdown")
-    except Exception:
-        bot.send_message(message.chat.id, respuesta, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, respuesta, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
 
+# 2. CALCULADORA (Procesa cualquier número ingresado)
 @bot.message_handler(func=lambda message: True)
 def calcular_monto(message):
     texto_usuario = message.text.strip().replace(',', '.')
@@ -104,14 +88,17 @@ def calcular_monto(message):
     try:
         monto = float(texto_usuario)
     except ValueError:
-        bot.reply_to(message, "⚠️ Por favor, escribe un número válido para calcular (ej. `100`) o usa el botón de abajo.", reply_markup=obtener_teclado_principal())
+        bot.reply_to(message, "⚠️ Por favor, escribe un número válido para calcular (ej. `100`).", reply_markup=obtener_teclado_principal())
         return
 
-    tasa_dolar_txt, tasa_euro_txt, val_dolar, val_euro = obtener_tasas_bcv()
+    tasa_dolar_str, tasa_euro_str = obtener_tasas_bcv()
     
-    if val_dolar == 0.0 or val_euro == 0.0:
-        bot.reply_to(message, "⚠️ No se pudo obtener la tasa del BCV en este momento para hacer el cálculo. Intenta más tarde.", reply_markup=obtener_teclado_principal())
+    if not tasa_dolar_str or not tasa_euro_str or tasa_dolar_str == "No disponible":
+        bot.reply_to(message, "⚠️ No se pudo obtener la tasa del BCV en este momento.", reply_markup=obtener_teclado_principal())
         return
+
+    val_dolar = limpiar_a_float(tasa_dolar_str)
+    val_euro = limpiar_a_float(tasa_euro_str)
 
     total_dolares = monto * val_dolar
     total_euros = monto * val_euro
@@ -121,9 +108,9 @@ def calcular_monto(message):
 
     respuesta_calc = (
         f"🧮 **Cálculo para `{monto:,.2f}`:**\n\n"
-        f"💵 A tasa del Dólar (`{tasa_dolar_txt} Bs.`):\n"
+        f"💵 A tasa del Dólar (`{tasa_dolar_str} Bs.`):\n"
         f"👉 **`{res_dolar_fmt}` Bs.**\n\n"
-        f"💶 A tasa del Euro (`{tasa_euro_txt} Bs.`):\n"
+        f"💶 A tasa del Euro (`{tasa_euro_str} Bs.`):\n"
         f"👉 **`{res_euro_fmt}` Bs.**"
     )
 
