@@ -32,10 +32,16 @@ def limpiar_tasa_a_float(texto_tasa):
 def obtener_tasas_bcv():
     url = "https://www.bcv.org.ve/"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'es-ES,es;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
     }
     try:
-        response = requests.get(url, headers=headers, verify=False, timeout=7)
+        # Subimos el timeout a 12 segundos para darle margen al servidor del BCV
+        response = requests.get(url, headers=headers, verify=False, timeout=12)
+        if response.status_code != 200:
+            return "No disponible", "No disponible", 0.0, 0.0
+            
         soup = BeautifulSoup(response.content, 'html.parser')
         
         div_dolar = soup.find('div', id='dolar')
@@ -68,9 +74,11 @@ def send_welcome(message):
     )
     bot.send_message(message.chat.id, texto, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
 
-# 1. PRIMERO: Detecta exclusivamente cuando presionas el botón de texto fijo
 @bot.message_handler(func=lambda message: message.text == "🔄 Actualizar Tasa BCV")
 def actualizar_por_boton(message):
+    # Avisamos al usuario inmediatamente para que no piense que se congeló
+    msg_espera = bot.send_message(message.chat.id, "⏳ Consultando al BCV...", reply_markup=obtener_teclado_principal())
+    
     tasa_dolar, tasa_euro, _, _ = obtener_tasas_bcv()
     
     if tasa_dolar != "No disponible" and tasa_euro != "No disponible":
@@ -83,9 +91,12 @@ def actualizar_por_boton(message):
     else:
         respuesta = "⚠️ La página del BCV está tardando o está caída. Intenta de nuevo en unos minutos."
     
-    bot.send_message(message.chat.id, respuesta, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
+    # Editamos el mensaje de espera con el resultado final
+    try:
+        bot.edit_message_text(respuesta, chat_id=message.chat.id, message_id=msg_espera.message_id, parse_mode="Markdown")
+    except Exception:
+        bot.send_message(message.chat.id, respuesta, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
 
-# 2. SEGUNDO: La calculadora procesa cualquier otro texto/número que envíe el usuario
 @bot.message_handler(func=lambda message: True)
 def calcular_monto(message):
     texto_usuario = message.text.strip().replace(',', '.')
