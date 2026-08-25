@@ -22,6 +22,15 @@ def run_web():
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
+def limpiar_tasa_a_float(texto_tasa):
+    """Limpia el texto del BCV (ej: '785,0693' o '36.123,45') a un float real."""
+    try:
+        # Quitamos espacios y reemplazamos la coma por punto para el decimal
+        limpio = texto_tasa.strip().replace('.', '').replace(',', '.')
+        return float(limpio)
+    except Exception:
+        return 0.0
+
 def obtener_tasas_bcv():
     url = "https://www.bcv.org.ve/"
     headers = {
@@ -32,24 +41,20 @@ def obtener_tasas_bcv():
         soup = BeautifulSoup(response.content, 'html.parser')
         
         div_dolar = soup.find('div', id='dolar')
-        tasa_dolar_str = div_dolar.find('strong').text.strip().replace(',', '.') if div_dolar else "0"
+        tasa_dolar_str = div_dolar.find('strong').text.strip() if div_dolar else "0"
         
         div_euro = soup.find('div', id='euro')
-        tasa_euro_str = div_euro.find('strong').text.strip().replace(',', '.') if div_euro else "0"
+        tasa_euro_str = div_euro.find('strong').text.strip() if div_euro else "0"
         
-        # Limpiar y convertir a float para poder hacer cálculos matemáticos
-        # En Venezuela el BCV usa puntos o comas según el formato, manejamos ambos
-        tasa_dolar_limpia = float(tasa_dolar_str.replace('.', '').replace(',', '.')) if tasa_dolar_str != "0" else 0.0
-        tasa_euro_limpia = float(tasa_euro_str.replace('.', '').replace(',', '.')) if tasa_euro_str != "0" else 0.0
+        # Obtenemos los valores flotantes corregidos
+        val_dolar = limpiar_tasa_a_float(tasa_dolar_str)
+        val_euro = limpiar_tasa_a_float(tasa_euro_str)
         
-        # Devolvemos tanto el texto original (para mostrar) como el float (para calcular)
-        return div_dolar.find('strong').text.strip() if div_dolar else "No disponible", \
-               div_euro.find('strong').text.strip() if div_euro else "No disponible", \
-               tasa_dolar_limpia, tasa_euro_limpia
+        return tasa_dolar_str, tasa_euro_str, val_dolar, val_euro
                
     except Exception as e:
         print(f"Error al obtener datos del BCV: {e}")
-        return None, None, 0.0, 0.0
+        return "No disponible", "No disponible", 0.0, 0.0
 
 def crear_markup():
     markup = InlineKeyboardMarkup()
@@ -62,7 +67,7 @@ def send_welcome(message):
     texto = (
         "¡Bienvenido al Bot de Tasas del BCV! 🇻🇪\n\n"
         "• Presiona el botón para consultar las tasas oficiales.\n"
-        "• O **escribe cualquier cantidad** (ej: `50` o `100.50`) para calcular su equivalencia en Bolívares basada en la tasa actual."
+        "• O **escribe cualquier cantidad** (ej: `100` o `50.50`) para calcular su equivalencia en Bolívares."
     )
     bot.send_message(message.chat.id, texto, reply_markup=crear_markup(), parse_mode="Markdown")
 
@@ -72,12 +77,12 @@ def callback_ver_tasa(call):
     
     tasa_dolar, tasa_euro, _, _ = obtener_tasas_bcv()
     
-    if tasa_dolar and tasa_euro:
+    if tasa_dolar != "No disponible" and tasa_euro != "No disponible":
         respuesta = (
             "📈 **Tasas Oficiales BCV:**\n\n"
             f"💵 **Dólar:** `{tasa_dolar}` Bs.\n"
             f"💶 **Euro:** `{tasa_euro}` Bs.\n\n"
-            "_💡 Tip: Escribe un monto (ej. 50) para calcular automáticamente._"
+            "_💡 Tip: Escribe un monto (ej. 100) para calcular automáticamente._"
         )
     else:
         respuesta = "⚠️ La página del BCV está tardando o está caída. Intenta de nuevo en unos minutos."
@@ -93,31 +98,26 @@ def callback_ver_tasa(call):
     except Exception:
         bot.send_message(call.message.chat.id, respuesta, parse_mode="Markdown", reply_markup=crear_markup())
 
-# NUEVO: Detector de números para la calculadora
 @bot.message_handler(func=lambda message: True)
 def calcular_monto(message):
     texto_usuario = message.text.strip().replace(',', '.')
     
     try:
-        # Intentamos convertir el mensaje del usuario a un número decimal
         monto = float(texto_usuario)
     except ValueError:
-        # Si el usuario escribió texto plano que no es un número, ignoramos o damos una pista
         bot.reply_to(message, "⚠️ Por favor, escribe solo un número válido para calcular (ej. `100` o `50.50`).", parse_mode="Markdown")
         return
 
-    # Consultamos las tasas actuales
     tasa_dolar_txt, tasa_euro_txt, val_dolar, val_euro = obtener_tasas_bcv()
     
     if val_dolar == 0.0 or val_euro == 0.0:
         bot.reply_to(message, "⚠️ No se pudo obtener la tasa del BCV en este momento para hacer el cálculo. Intenta más tarde.")
         return
 
-    # Realizamos las multiplicaciones
     total_dolares = monto * val_dolar
     total_euros = monto * val_euro
 
-    # Formateamos el resultado de manera limpia (separador de miles con puntos y decimales con comas al estilo venezolano)
+    # Formateamos el resultado con separador de miles por puntos y decimales por comas
     res_dolar_fmt = f"{total_dolares:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     res_euro_fmt = f"{total_euros:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
