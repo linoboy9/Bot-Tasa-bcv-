@@ -42,16 +42,10 @@ def obtener_tasas_bcv():
         print(f"Error al obtener datos del BCV: {e}")
         return None, None
 
-def limpiar_a_float(texto_tasa):
-    try:
-        return float(texto_tasa.replace('.', '').replace(',', '.'))
-    except Exception:
-        return 0.0
-
-def obtener_teclado_principal():
+def crear_teclado():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, persistent=True)
-    boton_actualizar = KeyboardButton("🔄 Actualizar Tasa BCV")
-    markup.add(boton_actualizar)
+    boton_tasa = KeyboardButton("🔄 Actualizar Tasa BCV")
+    markup.add(boton_tasa)
     return markup
 
 @bot.message_handler(commands=['start'])
@@ -59,13 +53,13 @@ def send_welcome(message):
     texto = (
         "¡Bienvenido al Bot de Tasas del BCV! 🇻🇪\n\n"
         "• Presiona el botón de abajo para consultar las tasas oficiales.\n"
-        "• O escribe un monto (ej: `100`) para calcular automáticamente."
+        "• O escribe cualquier monto (ej: `100`) para calcular automáticamente."
     )
-    bot.send_message(message.chat.id, texto, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, texto, reply_markup=crear_teclado(), parse_mode="Markdown")
 
-# 1. BOTÓN DE ACTUALIZAR (Debe ir primero para que capture el texto exacto del botón)
+# Manejador exclusivo para el botón de actualizar
 @bot.message_handler(func=lambda message: message.text == "🔄 Actualizar Tasa BCV")
-def actualizar_por_boton(message):
+def actualizar_tasas(message):
     tasa_dolar, tasa_euro = obtener_tasas_bcv()
     
     if tasa_dolar and tasa_euro:
@@ -78,9 +72,9 @@ def actualizar_por_boton(message):
     else:
         respuesta = "⚠️ La página del BCV está tardando o está caída. Intenta de nuevo en unos minutos."
     
-    bot.send_message(message.chat.id, respuesta, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, respuesta, reply_markup=crear_teclado(), parse_mode="Markdown")
 
-# 2. CALCULADORA (Procesa cualquier número ingresado)
+# Manejador de la calculadora (para cualquier número que escribas)
 @bot.message_handler(func=lambda message: True)
 def calcular_monto(message):
     texto_usuario = message.text.strip().replace(',', '.')
@@ -88,17 +82,22 @@ def calcular_monto(message):
     try:
         monto = float(texto_usuario)
     except ValueError:
-        bot.reply_to(message, "⚠️ Por favor, escribe un número válido para calcular (ej. `100`).", reply_markup=obtener_teclado_principal())
+        bot.reply_to(message, "⚠️ Por favor, escribe un número válido para calcular (ej. `100`).", reply_markup=crear_teclado())
         return
 
-    tasa_dolar_str, tasa_euro_str = obtener_tasas_bcv()
+    tasa_dolar, tasa_euro = obtener_tasas_bcv()
     
-    if not tasa_dolar_str or not tasa_euro_str or tasa_dolar_str == "No disponible":
-        bot.reply_to(message, "⚠️ No se pudo obtener la tasa del BCV en este momento.", reply_markup=obtener_teclado_principal())
+    if not tasa_dolar or not tasa_euro or tasa_dolar == "No disponible":
+        bot.reply_to(message, "⚠️ No se pudo obtener la tasa del BCV en este momento.", reply_markup=crear_teclado())
         return
 
-    val_dolar = limpiar_a_float(tasa_dolar_str)
-    val_euro = limpiar_a_float(tasa_euro_str)
+    try:
+        # Limpieza correcta que ya te funcionaba bien
+        val_dolar = float(tasa_dolar.replace('.', '').replace(',', '.'))
+        val_euro = float(tasa_euro.replace('.', '').replace(',', '.'))
+    except Exception:
+        bot.reply_to(message, "⚠️ Error al procesar los valores de las tasas.", reply_markup=crear_teclado())
+        return
 
     total_dolares = monto * val_dolar
     total_euros = monto * val_euro
@@ -108,13 +107,13 @@ def calcular_monto(message):
 
     respuesta_calc = (
         f"🧮 **Cálculo para `{monto:,.2f}`:**\n\n"
-        f"💵 A tasa del Dólar (`{tasa_dolar_str} Bs.`):\n"
+        f"💵 A tasa del Dólar (`{tasa_dolar} Bs.`):\n"
         f"👉 **`{res_dolar_fmt}` Bs.**\n\n"
-        f"💶 A tasa del Euro (`{tasa_euro_str} Bs.`):\n"
+        f"💶 A tasa del Euro (`{tasa_euro} Bs.`):\n"
         f"👉 **`{res_euro_fmt}` Bs.**"
     )
 
-    bot.reply_to(message, respuesta_calc, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
+    bot.reply_to(message, respuesta_calc, reply_markup=crear_teclado(), parse_mode="Markdown")
 
 if __name__ == "__main__":
     server_thread = threading.Thread(target=run_web, daemon=True)
