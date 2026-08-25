@@ -53,7 +53,6 @@ def obtener_tasas_bcv():
         print(f"Error al obtener datos del BCV: {e}")
         return "No disponible", "No disponible", 0.0, 0.0
 
-# NUEVO: Teclado fijo en la parte inferior
 def obtener_teclado_principal():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, persistent=True)
     boton_actualizar = KeyboardButton("🔄 Actualizar Tasa BCV")
@@ -69,7 +68,7 @@ def send_welcome(message):
     )
     bot.send_message(message.chat.id, texto, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
 
-# Detecta cuando presionas el botón fijo de abajo
+# 1. PRIMERO: Detecta exclusivamente cuando presionas el botón de texto fijo
 @bot.message_handler(func=lambda message: message.text == "🔄 Actualizar Tasa BCV")
 def actualizar_por_boton(message):
     tasa_dolar, tasa_euro, _, _ = obtener_tasas_bcv()
@@ -86,7 +85,7 @@ def actualizar_por_boton(message):
     
     bot.send_message(message.chat.id, respuesta, reply_markup=obtener_teclado_principal(), parse_mode="Markdown")
 
-# Manejador de la calculadora (para cualquier número que escribas)
+# 2. SEGUNDO: La calculadora procesa cualquier otro texto/número que envíe el usuario
 @bot.message_handler(func=lambda message: True)
 def calcular_monto(message):
     texto_usuario = message.text.strip().replace(',', '.')
@@ -94,7 +93,7 @@ def calcular_monto(message):
     try:
         monto = float(texto_usuario)
     except ValueError:
-        bot.reply_to(message, "⚠️ Por favor, escribe un número válido para calcular o usa el botón de actualizar.", reply_markup=obtener_teclado_principal())
+        bot.reply_to(message, "⚠️ Por favor, escribe un número válido para calcular (ej. `100`) o usa el botón de abajo.", reply_markup=obtener_teclado_principal())
         return
 
     tasa_dolar_txt, tasa_euro_txt, val_dolar, val_euro = obtener_tasas_bcv()
