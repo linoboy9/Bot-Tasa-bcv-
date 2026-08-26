@@ -10,6 +10,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
+
 @app.route('/')
 def home():
     return "Bot BCV Activo"
@@ -19,6 +20,10 @@ def run_web():
     app.run(host='0.0.0.0', port=port)
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
+if not TOKEN:
+    print("ERROR: Falta TELEGRAM_TOKEN")
+    exit(1)
+
 bot = telebot.TeleBot(TOKEN)
 
 def limpiar_tasa_a_float(texto_tasa):
@@ -32,19 +37,24 @@ def limpiar_tasa_a_float(texto_tasa):
 
 def obtener_tasas_bcv():
     url = "https://www.bcv.org.ve/"
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, verify=False, timeout=10)
+        r = requests.get(url, headers=headers, verify=False, timeout=10)
         soup = BeautifulSoup(r.content, 'html.parser')
-        dolar_str = soup.find('div', id='dolar').find('strong').text.strip()
-        euro_str = soup.find('div', id='euro').find('strong').text.strip()
-        return dolar_str, euro_str, limpiar_tasa_a_float(dolar_str), limpiar_tasa_a_float(euro_str)
+        
+        div_dolar = soup.find('div', id='dolar')
+        tasa_dolar_str = div_dolar.find('strong').text.strip() if div_dolar and div_dolar.find('strong') else "0"
+        
+        div_euro = soup.find('div', id='euro')
+        tasa_euro_str = div_euro.find('strong').text.strip() if div_euro and div_euro.find('strong') else "0"
+        
+        return tasa_dolar_str, tasa_euro_str, limpiar_tasa_a_float(tasa_dolar_str), limpiar_tasa_a_float(tasa_euro_str)
     except Exception as e:
         print(f"Error BCV: {e}")
         return "No disponible", "No disponible", 0.0, 0.0
 
-def crear_teclado_fijo():
-    # ESTE ES EL TRUCO: ReplyKeyboard en vez de Inline
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True)
+def teclado_fijo():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, one_time_keyboard=False)
     markup.add(KeyboardButton("🔄 Actualizar Tasa BCV"))
     return markup
 
@@ -55,43 +65,48 @@ def formatear_bs(valor):
 def send_welcome(message):
     texto = (
         "¡Bienvenido al Bot de Tasas del BCV! 🇻🇪\n\n"
-        "• Presiona el botón de abajo para consultar las tasas.\n"
-        "• O escribe cualquier cantidad (ej: `100`) y te calculo."
+        "• Usa el botón de abajo para ver la tasa.\n"
+        "• Escribe cualquier monto (ej: 50) y te calculo en Bs."
     )
-    bot.send_message(message.chat.id, texto, reply_markup=crear_teclado_fijo(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, texto, reply_markup=teclado_fijo(), parse_mode="Markdown")
 
-# Ahora el botón también es un mensaje de texto, lo capturamos aquí
 @bot.message_handler(func=lambda m: m.text == "🔄 Actualizar Tasa BCV")
-def handler_boton_fijo(message):
-    tasa_dolar, tasa_euro, _, _ = obtener_tasas_bcv()
-    if tasa_dolar != "No disponible":
-        respuesta = f"📈 **Tasas Oficiales BCV:**\n\n💵 **Dólar:** `{tasa_dolar}` Bs.\n💶 **Euro:** `{tasa_euro}` Bs."
+def mostrar_tasa(message):
+    dolar_txt, euro_txt, _, _ = obtener_tasas_bcv()
+    if dolar_txt != "No disponible":
+        resp = f"📈 **Tasas Oficiales BCV:**\n\n💵 Dólar: `{dolar_txt}` Bs.\n💶 Euro: `{euro_txt}` Bs."
     else:
-        respuesta = "⚠️ BCV caído, intenta en 1 min."
-    bot.send_message(message.chat.id, respuesta, parse_mode="Markdown", reply_markup=crear_teclado_fijo())
+        resp = "⚠️ BCV caído, intenta en 1 min."
+    bot.send_message(message.chat.id, resp, parse_mode="Markdown", reply_markup=teclado_fijo())
 
 @bot.message_handler(func=lambda message: True)
-def calcular_monto(message):
-    # Si es el botón, ya lo manejamos arriba
+def calcular(message):
     if message.text == "🔄 Actualizar Tasa BCV":
         return
+
     try:
         monto = float(message.text.strip().replace(',', '.'))
     except ValueError:
-        return # Ignoramos si escribe otra cosa que no sea número
-
-    txt_dolar, txt_euro, val_dolar, val_euro = obtener_tasas_bcv()
-    if val_dolar == 0.0:
-        bot.reply_to(message, "⚠️ No pude obtener tasa del BCV ahora.", reply_markup=crear_teclado_fijo())
+        bot.send_message(message.chat.id, "⚠️ Escribe solo un número válido, ej: `50` o `100.50`", parse_mode="Markdown", reply_markup=teclado_fijo())
         return
 
-    respuesta = (
-        f"🧮 **Cálculo para `{monto}`:**\n\n"
-        f"💵 Dólar (`{txt_dolar}`):\n👉 **{formatear_bs(monto * val_dolar)} Bs.**\n\n"
-        f"💶 Euro (`{txt_euro}`):\n👉 **{formatear_bs(monto * val_euro)} Bs.**"
+    dolar_txt, euro_txt, dolar_val, euro_val = obtener_tasas_bcv()
+    
+    if dolar_val == 0.0:
+        bot.send_message(message.chat.id, "⚠️ No pude obtener la tasa del BCV ahora.", reply_markup=teclado_fijo())
+        return
+
+    total_dolar = monto * dolar_val
+    total_euro = monto * euro_val
+
+    resp = (
+        f"🧮 **Cálculo para {monto}:**\n\n"
+        f"💵 Dólar (`{dolar_txt}`):\n👉 **{formatear_bs(total_dolar)} Bs.**\n\n"
+        f"💶 Euro (`{euro_txt}`):\n👉 **{formatear_bs(total_euro)} Bs.**"
     )
-    bot.reply_to(message, respuesta, parse_mode="Markdown", reply_markup=crear_teclado_fijo())
+    bot.send_message(message.chat.id, resp, parse_mode="Markdown", reply_markup=teclado_fijo())
 
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
+    print("Bot iniciado...")
     bot.infinity_polling(skip_pending=True)
